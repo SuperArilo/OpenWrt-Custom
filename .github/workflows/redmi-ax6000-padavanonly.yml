@@ -37,18 +37,18 @@ jobs:
     - name: 检查项目分支
       uses: actions/checkout@main
       
-    - name: 初始化编译环境
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL git.io/depends-ubuntu-2004)
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
+- name: 初始化编译环境
+  env:
+    DEBIAN_FRONTEND: noninteractive
+  run: |
+    sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+    sudo -E apt-get -qq update
+    sudo -E apt-get -qq install build-essential libncurses-dev libssl-dev libelf-dev zlib1g-dev gawk git subversion flex bison gettext unzip python3-distutils wget
+    sudo -E apt-get -qq autoremove --purge
+    sudo -E apt-get -qq clean
+    sudo timedatectl set-timezone "$TZ"
+    sudo mkdir -p /workdir
+    sudo chown $USER:$GROUPS /workdir
         
     - name: 清理磁盘空间(Ubuntu)
       uses: jlumbroso/free-disk-space@main
