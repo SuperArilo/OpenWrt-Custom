@@ -1,5 +1,5 @@
 ###############改名字##############
-name: redmi-ax6000-padavanonly
+- name: redmi-ax6000-padavanonly
 
 permissions: write-all
 # 开启写权限，防止无法上传到release
