@@ -17,7 +17,7 @@ on:
 
 env:
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-24.10
-  REPO_BRANCH: 24.10
+  REPO_BRANCH: 
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: redmi-ax6000/padavanonly/config/default.config
   DIY_P1_SH: redmi-ax6000/padavanonly/diy/diy-part1.sh
@@ -43,7 +43,7 @@ jobs:
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL https://github.com/fbt9910/OpenWrt-Custom/blob/001/depends-ubuntu-2204)
+        sudo -E apt-get -qq install $(curl -fsSL https://raw.githubusercontent.com/fbt9910/OpenWrt-Custom/001/depends-ubuntu-2204)
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
