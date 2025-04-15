@@ -17,7 +17,7 @@ on:
 
 env:
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-24.10
-  REPO_BRANCH: 
+  REPO_BRANCH: tree/2410
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: redmi-ax6000/padavanonly/config/default.config
   DIY_P1_SH: redmi-ax6000/padavanonly/diy/diy-part1.sh
