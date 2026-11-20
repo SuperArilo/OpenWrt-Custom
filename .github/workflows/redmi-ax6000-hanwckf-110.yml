@@ -31,19 +31,27 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     
     steps:
     - name: 检查项目分支
-      uses: actions/checkout@main
+      uses: actions/checkout@v4
       
     - name: 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete 2>/dev/null || true
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL git.io/depends-ubuntu-2004)
+        sudo -E apt-get -qq -o Acquire::Retries=3 install --no-install-recommends \
+          autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio \
+          curl device-tree-compiler flex gawk gettext git gperf haveged help2man intltool \
+          libelf-dev libglib2.0-dev libltdl-dev libmpc-dev libmpfr-dev libncurses-dev \
+          libpython3-dev libreadline-dev libssl-dev libtool libyaml-dev libz-dev lrzsz msmtp \
+          nano ninja-build p7zip-full patch pkgconf python3 python3-pip python3-ply \
+          python3-docutils python3-pyelftools python3-setuptools re2c rsync scons \
+          squashfs-tools subversion swig uglifyjs unzip vim wget xxd zlib1g-dev zstd
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -144,7 +152,7 @@ jobs:
         echo $GITHUB_OUTPUT
         
     - name: 上传固件到github
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-redmi-ax6000-hanwckf-110MB
@@ -164,7 +172,7 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
         
     - name: 发布至release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
