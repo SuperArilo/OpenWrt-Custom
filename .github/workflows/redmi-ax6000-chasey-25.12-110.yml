@@ -74,6 +74,22 @@ jobs:
         git clone -b $REPO_BRANCH --single-branch --filter=blob:none $REPO_URL openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
+    - name: 恢复编译缓存(dl + ccache)
+      uses: actions/cache@v4
+      with:
+        path: |
+          openwrt/dl
+          ~/.ccache
+        key: cache-110m-${{ hashFiles('redmi-ax6000/chasey-25.12-110/config/default.config') }}-${{ github.run_id }}
+        restore-keys: |
+          cache-110m-${{ hashFiles('redmi-ax6000/chasey-25.12-110/config/default.config') }}-
+          cache-110m-
+
+    - name: 配置 ccache 上限
+      run: |
+        ccache -M 3G || true
+        ccache -z || true
+
     - name: 加载feeds.conf.default & DIY_P1_SH
       run: |
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default

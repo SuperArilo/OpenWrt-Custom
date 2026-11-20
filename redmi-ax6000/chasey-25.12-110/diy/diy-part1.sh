@@ -10,9 +10,6 @@
 # Description: OpenWrt DIY script part 1 (Before Update feeds)
 #
 
-# Vantage 主题 feed（ImmortalWrt 自带 luci feeds 里没有）
-echo 'src-git vantage https://github.com/anothaDev/luci-theme-vantage.git' >> feeds.conf.default
-
 # daed 依赖 eBPF 工具链，但它只有 build 依赖 bpf-headers、没有 select NEED_BPF_TOOLCHAIN，
 # Kconfig 推不出要用 LLVM，bpf.mk 会拿到 /invalid/clang 报错。给两个隐藏符号补默认值。
 KCONF=toolchain/Config.in
