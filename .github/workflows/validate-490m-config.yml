@@ -108,13 +108,13 @@ jobs:
         KCONF=$(find build_dir -path "*linux-mediatek_filogic*" -name ".config" | head -n 1)
         [ -n "$KCONF" ] || { echo "kernel .config not found"; exit 1; }
         echo "kernel config: $KCONF"
+        cp "$KCONF" $GITHUB_WORKSPACE/kernel.config || true
         echo "=== BTF/DEBUG 相关行 ==="
         grep -E "DEBUG_INFO|_BTF" "$KCONF" || echo "(no match at all)"
         grep -qxF "CONFIG_DEBUG_INFO_BTF=y" "$KCONF" \
           || { echo "KERNEL BTF MISSING —— 刷了 daed 也起不来"; exit 1; }
         grep -qxF "CONFIG_DEBUG_INFO=y" "$KCONF" \
           || { echo "KERNEL DEBUG_INFO MISSING"; exit 1; }
-        cp "$KCONF" $GITHUB_WORKSPACE/kernel.config
         echo "内核断言通过，可以去跑完整编译了"
 
     - name: 上传展开配置
@@ -126,3 +126,28 @@ jobs:
           expanded.config
           kernel.config
         retention-days: 7
+
+    - name: 回写诊断到 diag 分支
+      if: always()
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        cd openwrt
+        {
+          echo "run=$GITHUB_RUN_ID sha=$GITHUB_SHA"
+          echo "--- buildroot related ---"
+          grep -E "DEBUG_INFO|_BTF|KPROBES|BPF_EVENTS|SCHED_BPF|VETH" "$GITHUB_WORKSPACE/expanded.config" || echo "(expanded.config missing)"
+          echo "--- kernel .config candidates ---"
+          find build_dir -name ".config" | head -n 20
+          for f in $(find build_dir -path "*linux-mediatek_filogic*" -name ".config"); do
+            echo "--- $f ---"
+            grep -E "DEBUG_INFO|_BTF|BPF_SYSCALL|BPF_JIT" "$f" || echo "(no match)"
+          done
+        } > /tmp/diag.txt 2>&1 || true
+        cd "$GITHUB_WORKSPACE"
+        git fetch origin diag 2>/dev/null || true
+        git checkout diag 2>/dev/null || git checkout --orphan diag
+        cp /tmp/diag.txt diag.txt
+        git add diag.txt
+        git -c user.name=validate-bot -c user.email=validate-bot@local commit -m "diag $GITHUB_RUN_ID" || true
+        git push origin diag --force
