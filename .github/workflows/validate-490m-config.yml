@@ -1,0 +1,121 @@
+###############改名字##############
+name: validate-490m-config
+
+# 只验证配置，不编译：展开 .config 并断言 BTF 三件套真实生效，
+# 通过后再去跑完整编译（redmi-ax6000-chasey-25.12-490m）。
+# 触发方式：手动，或改了 490m 的 config / 本工作流自动跑。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'redmi-ax6000/chasey-25.12-490m/config/default.config'
+      - '.github/workflows/validate-490m-config.yml'
+
+env:
+  REPO_URL: https://github.com/chasey-dev/immortalwrt-mt798x-rebase.git
+  REPO_BRANCH: 25.12
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: redmi-ax6000/chasey-25.12-490m/config/default.config
+  DIY_P1_SH: redmi-ax6000/chasey-25.12-490m/diy/diy-part1.sh
+  DIY_P2_SH: redmi-ax6000/chasey-25.12-490m/diy/diy-part2.sh
+  TZ: Asia/Shanghai
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: 检查项目分支
+      uses: actions/checkout@v4
+
+    - name: 安装 defconfig 所需依赖
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq --no-install-recommends install \
+          build-essential ca-certificates file flex gawk gettext git \
+          libncurses-dev python3 rsync unzip wget zlib1g-dev
+        sudo timedatectl set-timezone "$TZ" || true
+
+    - name: 下载固件源码（浅克隆，不编译）
+      run: |
+        sudo mkdir -p /workdir && sudo chown $USER:$GROUPS /workdir
+        git clone -b $REPO_BRANCH --single-branch --depth 1 $REPO_URL /workdir/openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
+    - name: 加载feeds.conf.default & DIY_P1_SH
+      run: |
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
+
+    - name: 更新 & 安装 feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 加载config & DIY_P2_SH
+      run: |
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: 展开配置（只 defconfig，不编译）
+      run: |
+        cd openwrt
+        make defconfig
+        cp .config $GITHUB_WORKSPACE/expanded.config
+
+    - name: 断言 BTF 三件套进展开配置
+      run: |
+        fail=0
+        for s in \
+          "CONFIG_KERNEL_DEBUG_INFO=y" \
+          "CONFIG_KERNEL_DEBUG_INFO_BTF=y" \
+          "CONFIG_KERNEL_MODULE_ALLOW_BTF_MISMATCH=y" \
+          "CONFIG_KERNEL_KPROBES=y" \
+          "CONFIG_KERNEL_BPF_EVENTS=y" \
+          "CONFIG_PACKAGE_kmod-sched-bpf=y" \
+          "CONFIG_PACKAGE_kmod-veth=y" \
+        ; do
+          grep -qxF "$s" expanded.config || { echo "MISSING: $s"; fail=1; }
+        done
+        grep -qxF "# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set" expanded.config \
+          || { echo "MISSING: REDUCED must be unset (BTF depends on !REDUCED)"; fail=1; }
+        if [ "$fail" -ne 0 ]; then
+          echo "buildroot 断言失败，完整编译免谈"
+          exit 1
+        fi
+        echo "buildroot 断言通过"
+
+    - name: 展开内核配置（只 prepare，不编译）
+      run: |
+        cd openwrt
+        make target/linux/prepare -j$(nproc) V=s
+
+    - name: 断言内核配置含 BTF
+      run: |
+        KCONF=$(find build_dir -path "*linux-mediatek_filogic*" -name ".config" | head -n 1)
+        [ -n "$KCONF" ] || { echo "kernel .config not found"; exit 1; }
+        echo "kernel config: $KCONF"
+        grep -qxF "CONFIG_DEBUG_INFO_BTF=y" "$KCONF" \
+          || { echo "KERNEL BTF MISSING —— 刷了 daed 也起不来"; exit 1; }
+        grep -qxF "CONFIG_DEBUG_INFO=y" "$KCONF" \
+          || { echo "KERNEL DEBUG_INFO MISSING"; exit 1; }
+        cp "$KCONF" $GITHUB_WORKSPACE/kernel.config
+        echo "内核断言通过，可以去跑完整编译了"
+
+    - name: 上传展开配置
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: 490m-config-check
+        path: |
+          expanded.config
+          kernel.config
+        retention-days: 7
