@@ -4,6 +4,9 @@ name: validate-490m-config
 # 只验证配置，不编译：展开 .config 并断言 BTF 三件套真实生效，
 # 通过后再去跑完整编译（redmi-ax6000-chasey-25.12-490m）。
 # 触发方式：手动，或改了 490m 的 config / 本工作流自动跑。
+#
+# 关键点：target/linux/prepare 只解压+打补丁，不产出内核 .config；
+# 内核配置由 target/linux/configure 生成（需要 host tools，不需要交叉 toolchain）。
 
 on:
   workflow_dispatch:
@@ -29,14 +32,14 @@ jobs:
     - name: 检查项目分支
       uses: actions/checkout@v4
 
-    - name: 安装 defconfig 所需依赖
+    - name: 安装所需依赖
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo -E apt-get -qq update
         sudo -E apt-get -qq --no-install-recommends install \
-          build-essential ca-certificates file flex gawk gettext git \
-          libncurses-dev python3 rsync unzip wget zlib1g-dev
+          build-essential bc ca-certificates file flex gawk gettext git \
+          libelf-dev libncurses-dev python3 rsync unzip wget zlib1g-dev
         sudo timedatectl set-timezone "$TZ" || true
 
     - name: 下载固件源码（浅克隆，不编译）
@@ -71,7 +74,7 @@ jobs:
         make defconfig
         cp .config $GITHUB_WORKSPACE/expanded.config
 
-    - name: 断言 BTF 三件套进展开配置
+    - name: 断言 BTF 三件套进 buildroot 配置
       run: |
         fail=0
         for s in \
@@ -87,30 +90,40 @@ jobs:
         done
         grep -qxF "# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set" expanded.config \
           || { echo "MISSING: REDUCED must be unset (BTF depends on !REDUCED)"; fail=1; }
-        if [ "$fail" -ne 0 ]; then
-          echo "buildroot 断言失败，完整编译免谈"
-          exit 1
-        fi
+        [ "$fail" -eq 0 ] || { echo "buildroot 断言失败"; exit 1; }
         echo "buildroot 断言通过"
 
-    - name: 展开内核配置（只 prepare，不编译）
+    - name: 生成内核配置（只 configure，不编译内核）
       run: |
         cd openwrt
-        make target/linux/prepare -j$(nproc) V=s
-        echo "=== build_dir 下所有 .config ==="
-        find build_dir -name ".config" | head -n 20
+        # prepare: 解压 + 打补丁（不产出 .config）
+        make target/linux/prepare -j$(nproc) V=s || true
+        # configure: 才真正生成内核 .config
+        make target/linux/configure -j$(nproc) V=s 2>&1 | tail -80 || true
+        echo "=== build_dir 概览 ==="
+        ls -la build_dir 2>&1 | head -20
+        echo "=== build_dir 三级目录 ==="
+        find build_dir -maxdepth 3 -type d 2>/dev/null | head -40
+        echo "=== 所有 .config 候选 ==="
+        find build_dir -name ".config" 2>/dev/null | head -20
 
     - name: 断言内核配置含 BTF
       run: |
         cd openwrt
-        echo "=== 候选内核配置 ==="
-        find build_dir -path "*linux-mediatek_filogic*" -name ".config"
-        KCONF=$(find build_dir -path "*linux-mediatek_filogic*" -name ".config" | head -n 1)
-        [ -n "$KCONF" ] || { echo "kernel .config not found"; exit 1; }
+        KCONF=$(find build_dir -path "*linux-mediatek_filogic*" -name ".config" 2>/dev/null | head -n 1)
+        if [ -z "$KCONF" ]; then
+          KCONF=$(find build_dir -name ".config" -size +10k 2>/dev/null | head -n 1)
+        fi
+        if [ -z "$KCONF" ]; then
+          echo "=== 找不到内核 .config，落盘现场 ==="
+          pwd; ls -la build_dir 2>&1 | head -20
+          find build_dir -maxdepth 4 -type d 2>/dev/null | head -40
+          exit 1
+        fi
         echo "kernel config: $KCONF"
-        cp "$KCONF" $GITHUB_WORKSPACE/kernel.config || true
+        cp "$KCONF" $GITHUB_WORKSPACE/kernel.config
         echo "=== BTF/DEBUG 相关行 ==="
-        grep -E "DEBUG_INFO|_BTF" "$KCONF" || echo "(no match at all)"
+        grep -E "DEBUG_INFO|_BTF|BPF_SYSCALL|BPF_JIT" "$KCONF" || echo "(no match)"
         grep -qxF "CONFIG_DEBUG_INFO_BTF=y" "$KCONF" \
           || { echo "KERNEL BTF MISSING —— 刷了 daed 也起不来"; exit 1; }
         grep -qxF "CONFIG_DEBUG_INFO=y" "$KCONF" \
@@ -137,9 +150,13 @@ jobs:
           echo "run=$GITHUB_RUN_ID sha=$GITHUB_SHA"
           echo "--- buildroot related ---"
           grep -E "DEBUG_INFO|_BTF|KPROBES|BPF_EVENTS|SCHED_BPF|VETH" "$GITHUB_WORKSPACE/expanded.config" || echo "(expanded.config missing)"
+          echo "--- build_dir ls ---"
+          ls -la build_dir 2>&1 | head -20
+          echo "--- build_dir dirs ---"
+          find build_dir -maxdepth 3 -type d 2>/dev/null | head -40
           echo "--- kernel .config candidates ---"
-          find build_dir -name ".config" | head -n 20
-          for f in $(find build_dir -path "*linux-mediatek_filogic*" -name ".config"); do
+          find build_dir -name ".config" 2>/dev/null | head -20
+          for f in $(find build_dir -name ".config" 2>/dev/null | head -5); do
             echo "--- $f ---"
             grep -E "DEBUG_INFO|_BTF|BPF_SYSCALL|BPF_JIT" "$f" || echo "(no match)"
           done
