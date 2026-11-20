@@ -97,12 +97,19 @@ jobs:
       run: |
         cd openwrt
         make target/linux/prepare -j$(nproc) V=s
+        echo "=== build_dir 下所有 .config ==="
+        find build_dir -name ".config" | head -n 20
 
     - name: 断言内核配置含 BTF
       run: |
+        cd openwrt
+        echo "=== 候选内核配置 ==="
+        find build_dir -path "*linux-mediatek_filogic*" -name ".config"
         KCONF=$(find build_dir -path "*linux-mediatek_filogic*" -name ".config" | head -n 1)
         [ -n "$KCONF" ] || { echo "kernel .config not found"; exit 1; }
         echo "kernel config: $KCONF"
+        echo "=== BTF/DEBUG 相关行 ==="
+        grep -E "DEBUG_INFO|_BTF" "$KCONF" || echo "(no match at all)"
         grep -qxF "CONFIG_DEBUG_INFO_BTF=y" "$KCONF" \
           || { echo "KERNEL BTF MISSING —— 刷了 daed 也起不来"; exit 1; }
         grep -qxF "CONFIG_DEBUG_INFO=y" "$KCONF" \
