@@ -41,6 +41,20 @@ cp "${GITHUB_WORKSPACE:-..}/patches/614-netfilter-tcp-no-window-check-per-netns.
    target/linux/mediatek/patches-6.12/614-netfilter-tcp-no-window-check-per-netns.patch
 echo "已注入 nf_conntrack_qos / tcp_no_window_check 两个 per-net 补丁"
 
+# ============ 摘掉 MTK HNAT 里的 trace_printk（内核会被标成 DEBUG kernel）============
+# 只要镜像里有 trace_printk() 引用，启动就会打印那条 NOTICE 并多分配 ringbuffer；
+# 这三处都是 MTK 的调试打印，换成 pr_debug 行为不变，DYNAMIC_DEBUG 默认也不输出。
+# 三个补丁要一起换：5110 里那行 trace_printk 是上下文行，匹配的是 eth-91 加进去的代码。
+K=target/linux/mediatek/patches-6.12
+for p in 999-eth-91-mtk_eth_soc-add-mtkhnat-driver-support.patch \
+         999-zzz-5110-net-mediatek-mtk_eth_soc-support-rx-ppd-redirect.patch \
+         999-zzz-5116-mtk-hnat-bypass-ge-ppd-carrier.patch; do
+  [ -f "$K/$p" ] || continue
+  sed -i 's/trace_printk(/pr_debug(/g' "$K/$p"
+  grep -q trace_printk "$K/$p" && { echo "$p 还留着 trace_printk"; exit 1; }
+done
+echo "已把 MTK HNAT 的 trace_printk 换成 pr_debug"
+
 # ============ IPv6 邻居清理 hotplug ============
 mkdir -p package/base-files/files/etc/hotplug.d/iface
 cat << "EOF" > package/base-files/files/etc/hotplug.d/iface/30-ipv6-event
