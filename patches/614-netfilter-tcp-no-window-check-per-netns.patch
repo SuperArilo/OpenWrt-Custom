@@ -7,19 +7,29 @@ global data and register_net_sysctl_sz() emits
     sysctl net/netfilter/nf_conntrack_tcp_no_window_check:
     data points to kernel global data
 
-plus a WARN() per namespace (daed, lxc and anything else that unshares a
-netns triggers it). A global also loses per-netns semantics: writing the
-knob in one namespace leaks into every other one.
+plus a WARN() per namespace. daed, lxc, container runtimes and anything
+else that unshares a netns trips it. A global also loses per-netns
+semantics: writing the knob in one namespace leaks into every other one.
 
-Move the value into struct nf_tcp_net next to tcp_loose / tcp_be_liberal
-and bind the sysctl through XASSIGN() in
-nf_conntrack_standalone_init_tcp_sysctl(). This is the shape OpenWrt used
-for 5.15 (ansuelsmth, "generic: 5.15: fix panic on tcp_no_window_check set
-with interface up"), which also fixed a real panic when the knob was
-written while an interface was up.
+Follow the rework OpenWrt did for 5.15 (ansuelsmth, "generic: 5.15: fix
+panic on tcp_no_window_check set with interface up"):
 
-Behaviour is unchanged for the default path: the per-netns copy starts at
-0, so the TCP window check stays enabled exactly as upstream does.
+  - keep the value in struct nf_tcp_net as u8 next to tcp_be_liberal;
+  - drop the hardcoded .data and bind the ctl_table entry through
+    XASSIGN(NO_WINDOW_CHECK, &tn->tcp_no_window_check), with
+    proc_dou8vec_minmax clamped to 0..1 like tcp_loose/tcp_be_liberal;
+  - swap the two readers over to tn->tcp_no_window_check.
+
+Divergence from that OpenWrt patch, deliberate: it seeds the field to 0 in
+nf_conntrack_tcp_init_net(), which silently turns the bypass off and
+leaves the knob doing nothing unless written by hand. The MTK feed keeps
+this patch precisely because it wants the bypass on by default, and the
+global it replaces was initialised to 1, so the field is seeded to 1 here.
+Net behaviour is therefore identical to before, minus the warning.
+
+The panic ansuelsmth fixed is also gone: the sysctl no longer points at
+the init_net copy, so writing it while an interface is up updates the
+owning namespace instead of racing a global.
 
 --- a/net/netfilter/nf_conntrack_proto_tcp.c
 +++ b/net/netfilter/nf_conntrack_proto_tcp.c
@@ -60,6 +70,19 @@ Behaviour is unchanged for the default path: the per-netns copy starts at
  		 timeouts[new_state] > timeouts[TCP_CONNTRACK_RETRANS])
  		timeout = timeouts[TCP_CONNTRACK_RETRANS];
  	else
+@@ -1601,6 +1600,12 @@
+ 	 * connections.
+ 	 */
+ 	tn->tcp_loose = 1;
+ 
++	/* MTK: skip the TCP window check by default, matching the
++	 * nf_ct_tcp_no_window_check module knob this field replaces.
++	 */
++	tn->tcp_no_window_check = 1;
++
+ 	/* "Be conservative in what you do,
+ 	 *  be liberal in what you accept from others."
+ 	 * If it's non-zero, we mark only out of window RST segments as INVALID.
 --- a/net/netfilter/nf_conntrack_standalone.c
 +++ b/net/netfilter/nf_conntrack_standalone.c
 @@ -25,9 +25,6 @@
@@ -86,22 +109,20 @@ Behaviour is unchanged for the default path: the per-netns copy starts at
  	},
  };
  
-@@ -988,6 +986,7 @@
+@@ -986,6 +984,7 @@
  	XASSIGN(LOOSE, &tn->tcp_loose);
  	XASSIGN(LIBERAL, &tn->tcp_be_liberal);
++	XASSIGN(NO_WINDOW_CHECK, &tn->tcp_no_window_check);
  	XASSIGN(MAX_RETRANS, &tn->tcp_max_retrans);
  	XASSIGN(IGNORE_INVALID_RST, &tn->tcp_ignore_invalid_rst);
-+	XASSIGN(NO_WINDOW_CHECK, &tn->tcp_no_window_check);
  #undef XASSIGN
- 
- #if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
 --- a/include/net/netns/conntrack.h
 +++ b/include/net/netns/conntrack.h
-@@ -28,6 +28,7 @@
+@@ -26,6 +26,7 @@
+ 	unsigned int timeouts[TCP_CONNTRACK_TIMEOUT_MAX];
+ 	u8 tcp_loose;
  	u8 tcp_be_liberal;
++	u8 tcp_no_window_check;
  	u8 tcp_max_retrans;
  	u8 tcp_ignore_invalid_rst;
-+	u8 tcp_no_window_check;
  #if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
- 	unsigned int offload_timeout;
- #endif
