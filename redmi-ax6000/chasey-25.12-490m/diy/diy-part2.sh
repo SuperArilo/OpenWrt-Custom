@@ -43,7 +43,7 @@ echo "已注入 nf_conntrack_qos / tcp_no_window_check 两个 per-net 补丁"
 
 # ============ IPv6 邻居清理 hotplug ============
 mkdir -p package/base-files/files/etc/hotplug.d/iface
-cat << "EOF" > package/base-files/etc/hotplug.d/iface/30-ipv6-event
+cat << "EOF" > package/base-files/files/etc/hotplug.d/iface/30-ipv6-event
 #!/bin/sh
 # IPv6 邻居清理：接口 up 后清掉 STALE/FAILED 的邻居表项，避免运营商换前缀后残留黑洞
 
