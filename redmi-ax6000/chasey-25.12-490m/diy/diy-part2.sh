@@ -25,21 +25,18 @@ echo "490m 机型注入完成"
 sed -i 's/192.168.1.1/172.16.1.1/g' package/base-files/files/bin/config_generate
 sed -i 's/OpenWrt/RedMi-AX6000/g' package/base-files/files/bin/config_generate
 
-# ============ eqos 启动顺序修复（MT7531 网口偶发不认线）============
-# luci-app-eqos-mtk 默认 START=50，紧跟 S20network 在 ~15.5s 打开 HQoS，
-# 此时 MT7531 交换机还没配完端口，偶发整机有线口无载波（br-lan 无成员，只能 WiFi 上线）。
-# 实测改成 95 后 HQoS 落到 ~28s（交换机 15.9s 初始化、19s 出载波之后），连续重启不再复现。
-EQOS_INIT=package/mtk/applications/luci-app-eqos-mtk/root/etc/init.d/eqos
-sed -i 's/^START=50$/START=95/' "$EQOS_INIT" || { echo "eqos START 修改失败"; exit 1; }
-grep -q '^START=95$' "$EQOS_INIT" || { echo "eqos START 未写入"; exit 1; }
-echo "eqos 启动顺序已改为 START=95"
-
 # ============ firewall4 FullCone 补丁（新版才替换）============
 if grep -q "^PKG_SOURCE_DATE:=2026-11-08" package/network/config/firewall4/Makefile 2>/dev/null; then
   cp "${GITHUB_WORKSPACE:-..}/patches/001-firewall4-add-support-for-fullcone-nat.patch" \
      package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch
   echo "已替换 firewall4 FullCone 补丁为适配新版（2026-11-08）的版本"
 fi
+
+# ============ MTK PPE nf_conntrack_qos per-net 补丁（消 daed/unshare 那俩 WARNING）============
+mkdir -p target/linux/mediatek/patches-6.12
+cp "${GITHUB_WORKSPACE:-..}/patches/999-ppe-54-netfilter-fix-per-net-nf_conntrack_qos-sysctl.patch" \
+   target/linux/mediatek/patches-6.12/999-ppe-54-netfilter-fix-per-net-nf_conntrack_qos-sysctl.patch
+echo "已注入 nf_conntrack_qos per-net 补丁"
 
 # ============ IPv6 邻居清理 hotplug ============
 mkdir -p package/base-files/files/etc/hotplug.d/iface
