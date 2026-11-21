@@ -1,0 +1,107 @@
+netfilter: conntrack: make nf_conntrack_tcp_no_window_check per-netns
+
+The MTK "optional tcp window check" patch keeps the toggle in a module
+global, so every new network namespace re-registers the sysctl against
+global data and register_net_sysctl_sz() emits
+
+    sysctl net/netfilter/nf_conntrack_tcp_no_window_check:
+    data points to kernel global data
+
+plus a WARN() per namespace (daed, lxc and anything else that unshares a
+netns triggers it). A global also loses per-netns semantics: writing the
+knob in one namespace leaks into every other one.
+
+Move the value into struct nf_tcp_net next to tcp_loose / tcp_be_liberal
+and bind the sysctl through XASSIGN() in
+nf_conntrack_standalone_init_tcp_sysctl(). This is the shape OpenWrt used
+for 5.15 (ansuelsmth, "generic: 5.15: fix panic on tcp_no_window_check set
+with interface up"), which also fixed a real panic when the knob was
+written while an interface was up.
+
+Behaviour is unchanged for the default path: the per-netns copy starts at
+0, so the TCP window check stays enabled exactly as upstream does.
+
+--- a/net/netfilter/nf_conntrack_proto_tcp.c
++++ b/net/netfilter/nf_conntrack_proto_tcp.c
+@@ -31,9 +31,6 @@
+ #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
+ #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
+ 
+-/* Do not check the TCP window for incoming packets  */
+-static int nf_ct_tcp_no_window_check __read_mostly = 1;
+-
+   /* FIXME: Examine ipfilter's timeouts and conntrack transitions more
+      closely.  They're more complex. --RR */
+ 
+@@ -515,6 +512,8 @@
+ 	      unsigned int dataoff, const struct tcphdr *tcph,
+ 	      const struct nf_hook_state *hook_state)
+ {
++	struct net *net = nf_ct_net(ct);
++	struct nf_tcp_net *tn = nf_tcp_pernet(net);
+ 	struct ip_ct_tcp *state = &ct->proto.tcp;
+ 	struct ip_ct_tcp_state *sender = &state->seen[dir];
+ 	struct ip_ct_tcp_state *receiver = &state->seen[!dir];
+@@ -523,7 +522,7 @@
+ 	s32 receiver_offset;
+ 	u16 win_raw;
+ 
+-	if (nf_ct_tcp_no_window_check)
++	if (tn->tcp_no_window_check)
+ 		return NFCT_TCP_ACCEPT;
+ 
+ 	/*
+@@ -1291,7 +1290,7 @@
+ 		 IP_CT_TCP_FLAG_DATA_UNACKNOWLEDGED &&
+ 		 timeouts[new_state] > timeouts[TCP_CONNTRACK_UNACK])
+ 		timeout = timeouts[TCP_CONNTRACK_UNACK];
+-	else if (!nf_ct_tcp_no_window_check && ct->proto.tcp.last_win == 0 &&
++	else if (!tn->tcp_no_window_check && ct->proto.tcp.last_win == 0 &&
+ 		 timeouts[new_state] > timeouts[TCP_CONNTRACK_RETRANS])
+ 		timeout = timeouts[TCP_CONNTRACK_RETRANS];
+ 	else
+--- a/net/netfilter/nf_conntrack_standalone.c
++++ b/net/netfilter/nf_conntrack_standalone.c
+@@ -25,9 +25,6 @@
+ #include <net/netfilter/nf_conntrack_netlink.h>
+ #include <linux/rculist_nulls.h>
+ 
+-/* Do not check the TCP window for incoming packets  */
+-static int nf_ct_tcp_no_window_check __read_mostly = 1;
+-
+ static bool enable_hooks __read_mostly;
+ MODULE_PARM_DESC(enable_hooks, "Always enable conntrack hooks");
+ module_param(enable_hooks, bool, 0000);
+@@ -944,11 +941,12 @@
+ 	[NF_SYSCTL_CT_PROTO_TCP_NO_WINDOW_CHECK] = {
+ 		.procname       = "nf_conntrack_tcp_no_window_check",
+-		.data           = &nf_ct_tcp_no_window_check,
+-		.maxlen         = sizeof(unsigned int),
++		.maxlen         = sizeof(u8),
+ 		.mode           = 0644,
+-		.proc_handler   = proc_dointvec,
++		.proc_handler   = proc_dou8vec_minmax,
++		.extra1         = SYSCTL_ZERO,
++		.extra2         = SYSCTL_ONE,
+ 	},
+ };
+ 
+@@ -988,6 +986,7 @@
+ 	XASSIGN(LOOSE, &tn->tcp_loose);
+ 	XASSIGN(LIBERAL, &tn->tcp_be_liberal);
+ 	XASSIGN(MAX_RETRANS, &tn->tcp_max_retrans);
+ 	XASSIGN(IGNORE_INVALID_RST, &tn->tcp_ignore_invalid_rst);
++	XASSIGN(NO_WINDOW_CHECK, &tn->tcp_no_window_check);
+ #undef XASSIGN
+ 
+ #if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+--- a/include/net/netns/conntrack.h
++++ b/include/net/netns/conntrack.h
+@@ -28,6 +28,7 @@
+ 	u8 tcp_be_liberal;
+ 	u8 tcp_max_retrans;
+ 	u8 tcp_ignore_invalid_rst;
++	u8 tcp_no_window_check;
+ #if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+ 	unsigned int offload_timeout;
+ #endif

@@ -32,15 +32,18 @@ if grep -q "^PKG_SOURCE_DATE:=2026-11-08" package/network/config/firewall4/Makef
   echo "已替换 firewall4 FullCone 补丁为适配新版（2026-11-08）的版本"
 fi
 
-# ============ MTK PPE nf_conntrack_qos per-net 补丁（消 daed/unshare 那俩 WARNING）============
+# ============ MTK 两个全局 sysctl 改 per-net（消 daed/unshare 的 register_net_sysctl_sz WARNING）============
 mkdir -p target/linux/mediatek/patches-6.12
 cp "${GITHUB_WORKSPACE:-..}/patches/999-ppe-54-netfilter-fix-per-net-nf_conntrack_qos-sysctl.patch" \
    target/linux/mediatek/patches-6.12/999-ppe-54-netfilter-fix-per-net-nf_conntrack_qos-sysctl.patch
-echo "已注入 nf_conntrack_qos per-net 补丁"
+# 613 是 chasey 自带的全局变量版 tcp_no_window_check，614 排在它后面改成 per-netns
+cp "${GITHUB_WORKSPACE:-..}/patches/614-netfilter-tcp-no-window-check-per-netns.patch" \
+   target/linux/mediatek/patches-6.12/614-netfilter-tcp-no-window-check-per-netns.patch
+echo "已注入 nf_conntrack_qos / tcp_no_window_check 两个 per-net 补丁"
 
 # ============ IPv6 邻居清理 hotplug ============
 mkdir -p package/base-files/files/etc/hotplug.d/iface
-cat << "EOF" > package/base-files/files/etc/hotplug.d/iface/30-ipv6-event
+cat << "EOF" > package/base-files/etc/hotplug.d/iface/30-ipv6-event
 #!/bin/sh
 # IPv6 邻居清理：接口 up 后清掉 STALE/FAILED 的邻居表项，避免运营商换前缀后残留黑洞
 
