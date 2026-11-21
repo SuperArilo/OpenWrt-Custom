@@ -41,26 +41,6 @@ cp "${GITHUB_WORKSPACE:-..}/patches/614-netfilter-tcp-no-window-check-per-netns.
    target/linux/mediatek/patches-6.12/614-netfilter-tcp-no-window-check-per-netns.patch
 echo "已注入 nf_conntrack_qos / tcp_no_window_check 两个 per-net 补丁"
 
-# ============ 摘掉 MTK HNAT 里的 trace_printk（内核会被标成 DEBUG kernel）============
-# 只要镜像里有 trace_printk() 引用，启动就会打印那条 NOTICE 并多分配 ringbuffer。
-# 这些全是 MTK 的调试打印，换成 pr_debug 行为不变，DYNAMIC_DEBUG 默认也不输出。
-#
-# 注意：hnat_nf_hook.c 是 files-6.12 下的静态文件（17 处），5116/5110 补丁里有几行
-# trace_printk 是引用它的「上下文行」。静态文件和所有引用它的补丁必须一起换，
-# 只改补丁会让上下文对不上（Hunk FAILED）。
-K=target/linux/mediatek/patches-6.12
-F=target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
-[ -f "$F" ] && sed -i 's/trace_printk(/pr_debug(/g' "$F"
-for p in 999-eth-91-mtk_eth_soc-add-mtkhnat-driver-support.patch \
-         999-zzz-5110-net-mediatek-mtk_eth_soc-support-rx-ppd-redirect.patch \
-         999-zzz-5116-mtk-hnat-bypass-ge-ppd-carrier.patch; do
-  [ -f "$K/$p" ] || continue
-  sed -i 's/trace_printk(/pr_debug(/g' "$K/$p"
-done
-grep -q trace_printk "$K/999-eth-91-mtk_eth_soc-add-mtkhnat-driver-support.patch" && { echo "eth-91 还留着 trace_printk"; exit 1; }
-grep -q trace_printk "$F" && { echo "hnat_nf_hook.c 还留着 trace_printk"; exit 1; }
-echo "已把 MTK HNAT 的 trace_printk 换成 pr_debug（静态文件 + 3 个补丁）"
-
 # ============ IPv6 邻居清理 hotplug ============
 mkdir -p package/base-files/files/etc/hotplug.d/iface
 cat << "EOF" > package/base-files/files/etc/hotplug.d/iface/30-ipv6-event
