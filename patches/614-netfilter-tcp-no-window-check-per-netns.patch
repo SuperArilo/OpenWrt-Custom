@@ -61,7 +61,7 @@ owning namespace instead of racing a global.
  		return NFCT_TCP_ACCEPT;
  
  	/*
-@@ -1291,7 +1290,7 @@
+@@ -1292,7 +1291,7 @@
  		 IP_CT_TCP_FLAG_DATA_UNACKNOWLEDGED &&
  		 timeouts[new_state] > timeouts[TCP_CONNTRACK_UNACK])
  		timeout = timeouts[TCP_CONNTRACK_UNACK];
@@ -70,8 +70,7 @@ owning namespace instead of racing a global.
  		 timeouts[new_state] > timeouts[TCP_CONNTRACK_RETRANS])
  		timeout = timeouts[TCP_CONNTRACK_RETRANS];
  	else
-@@ -1601,6 +1600,12 @@
- 	 * connections.
+@@ -1602,6 +1601,11 @@
  	 */
  	tn->tcp_loose = 1;
  
@@ -85,8 +84,8 @@ owning namespace instead of racing a global.
  	 * If it's non-zero, we mark only out of window RST segments as INVALID.
 --- a/net/netfilter/nf_conntrack_standalone.c
 +++ b/net/netfilter/nf_conntrack_standalone.c
-@@ -25,9 +25,6 @@
- #include <net/netfilter/nf_conntrack_netlink.h>
+@@ -24,9 +24,6 @@
+ #include <net/netfilter/nf_conntrack_timestamp.h>
  #include <linux/rculist_nulls.h>
  
 -/* Do not check the TCP window for incoming packets  */
@@ -95,7 +94,8 @@ owning namespace instead of racing a global.
  static bool enable_hooks __read_mostly;
  MODULE_PARM_DESC(enable_hooks, "Always enable conntrack hooks");
  module_param(enable_hooks, bool, 0000);
-@@ -944,11 +941,12 @@
+@@ -946,10 +943,11 @@
+ #endif
  	[NF_SYSCTL_CT_PROTO_TCP_NO_WINDOW_CHECK] = {
  		.procname       = "nf_conntrack_tcp_no_window_check",
 -		.data           = &nf_ct_tcp_no_window_check,
@@ -109,7 +109,8 @@ owning namespace instead of racing a global.
  	},
  };
  
-@@ -986,6 +984,7 @@
+@@ -988,6 +986,7 @@
+ 
  	XASSIGN(LOOSE, &tn->tcp_loose);
  	XASSIGN(LIBERAL, &tn->tcp_be_liberal);
 +	XASSIGN(NO_WINDOW_CHECK, &tn->tcp_no_window_check);
