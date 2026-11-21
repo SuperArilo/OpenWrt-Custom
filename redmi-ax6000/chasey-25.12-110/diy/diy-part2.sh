@@ -34,7 +34,7 @@ fi
 
 # ============ MTK PPE nf_conntrack_qos per-net 补丁（消 daed/unshare 那俩 WARNING）============
 mkdir -p target/linux/mediatek/patches-6.12
-cp "${GITHUB_WORKSPACE:-..}/patches/999-ppe-54-netfilter-focus-per-net-nf_conntrack_qos-sysctl.patch" \
+cp "${GITHUB_WORKSPACE:-..}/patches/999-ppe-54-netfilter-fix-per-net-nf_conntrack_qos-sysctl.patch" \
    target/linux/mediatek/patches-6.12/999-ppe-54-netfilter-fix-per-net-nf_conntrack_qos-sysctl.patch
 echo "已注入 nf_conntrack_qos per-net 补丁"
 
