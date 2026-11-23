@@ -1,0 +1,191 @@
+###############改名字##############
+name: redmi-ax6000-immortalwrt-master-490m
+
+permissions: write-all
+# 开启写权限，防止无法上传到release
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: false
+        default: 'false'
+
+env:
+  REPO_URL: https://github.com/immortalwrt/immortalwrt.git
+  REPO_BRANCH: master
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: redmi-ax6000/immortalwrt-master-490m/config/default.config
+  DIY_P1_SH: redmi-ax6000/immortalwrt-master-490m/diy/diy-part1.sh
+  DIY_P2_SH: redmi-ax6000/immortalwrt-master-490m/diy/diy-part2.sh
+  SSH_ACTIONS: false
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
+  ###############改名字##############
+  OPENWRT_NAME: AX6000
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: 检查项目分支
+      uses: actions/checkout@v4
+
+    - name: 初始化编译环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete 2>/dev/null || true
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo -E apt-get -qq update
+        # 精简依赖：eBPF 工具链由源码树自己编 llvm-bpf，不需要宿主 clang
+        sudo -E apt-get -qq -o Acquire::Retries=3 install --no-install-recommends \
+          autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio \
+          curl device-tree-compiler flex gawk gettext git gperf haveged help2man intltool \
+          libelf-dev libglib2.0-dev libltdl-dev libmpc-dev libmpfr-dev libncurses-dev \
+          libpython3-dev libreadline-dev libssl-dev libtool libyaml-dev libz-dev lrzsz msmtp \
+          nano ninja-build p7zip-full patch pkgconf python3 python3-pip python3-ply \
+          python3-docutils python3-pyelftools python3-setuptools re2c rsync scons \
+          squashfs-tools subversion swig uglifyjs unzip vim wget xxd zlib1g-dev zstd
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+
+    - name: 清理磁盘空间(Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: false
+        dotnet: false
+        haskell: false
+        large-packages: false
+        swap-storage: false
+
+    - name: 下载固件源码
+      working-directory: /workdir
+      run: |
+        df -hT $PWD
+        git clone -b $REPO_BRANCH --single-branch --filter=blob:none $REPO_URL openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
+    - name: 恢复编译缓存(dl + ccache)
+      uses: actions/cache@v4
+      with:
+        path: |
+          openwrt/dl
+          ~/.ccache
+        key: cache-master490m-${{ hashFiles('redmi-ax6000/immortalwrt-master-490m/config/default.config') }}-${{ github.run_id }}
+        restore-keys: |
+          cache-master490m-${{ hashFiles('redmi-ax6000/immortalwrt-master-490m/config/default.config') }}-
+          cache-master490m-
+
+    - name: 配置 ccache 上限
+      run: |
+        ccache -M 3G || true
+        ccache -z || true
+
+    - name: 加载feeds.conf.default & DIY_P1_SH
+      run: |
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
+
+    - name: 更新 & 安装 feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 加载config & DIY_P2_SH
+      run: |
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: SSH链接管理
+      uses: P3TERX/ssh2actions@v1.0.0
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+      env:
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+    - name: 下载安装包
+      id: package
+      run: |
+        cd openwrt
+        make defconfig
+        make download -j$(nproc)
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 编译固件
+      id: compile
+      run: |
+        cd openwrt
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 查看磁盘使用情况
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 整理文件并重命名
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      run: |
+        cd openwrt/bin/targets/*/*
+        rm -rf packages
+        for f in *.bin *.itb *.ubi *.tar; do
+          [ -f "$f" ] || continue
+          mv "$f" "${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-ax6000-490m-$f"
+        done
+        # 改名后重算校验和，避免 sha256sums 与文件名对不上
+        rm -f sha256sums
+        sha256sum * > sha256sums 2>/dev/null || true
+        ls -lh
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 上传固件到github
+      uses: actions/upload-artifact@v4
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: ${{ env.FILE_DATE }}-${{ env.OPENWRT_NAME }}-redmi-ax6000-immortalwrt-master-490m
+        path: ${{ env.FIRMWARE }}
+
+    - name: 生成release标签
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "release_tag=${{ env.OPENWRT_NAME }}-xiaomi_redmi-router-ax6000-490m-${{ env.FILE_DATE }}" >> $GITHUB_OUTPUT
+        touch release.txt
+        echo "由衷感谢所有为openwrt无私奉献的大佬们" >> release.txt
+        echo " 固件 ip 172.16.1.1，主机名 Miku，时区 CST-8" >> release.txt
+        echo " 固件布局: MTK U-Boot 单 ubi 490M（0x600000 + 0x1ea00000）" >> release.txt
+        echo " 官方 immortalwrt master 开源驱动版（mt76/kmod-mt7915e），内核 6.18" >> release.txt
+        echo " 加速: nft flow offload（软件），无闭源 hnat/warp" >> release.txt
+        echo " 预置南大 apk 源；eBPF/BTF 已开（honk/daed 可用）" >> release.txt
+        echo " 固件源码地址来自: immortalwrt/immortalwrt（master）" >> release.txt
+        echo " 刷机前请在 hanwckf uboot 里把布局切到 490m，再刷 sysupgrade.bin" >> release.txt
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 发布至release
+      uses: softprops/action-gh-release@v2
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        files: ${{ env.FIRMWARE }}/*
+        name: redmi-ax6000-${{ env.OPENWRT_NAME }}-${{ env.FILE_DATE }}
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
